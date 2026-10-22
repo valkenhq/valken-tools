@@ -1,0 +1,43 @@
+[package]
+name = "valken-tools"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.88"
+description = "Valken's agent tool layer: one tool registry for the in-app agent and the MCP server, with redaction and an append-only audit log"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["lib"]
+
+[[bin]]
+name = "valken-mcp"
+path = "src/bin/valken-mcp.rs"
+
+[dependencies]
+valken-core = { git = "ssh://git@github.com:22/valkenhq/valken-core.git", tag = "v0.3.4", default-features = false }
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3.31"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+k8s-openapi = { version = "0.27.0", features = ["v1_34"] }
+kube = { version = "3.0", features = ["runtime", "derive"] }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "json"] }
+schemars = "1.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.49", features = ["io-util", "io-std", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.41"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.49", features = ["io-util", "io-std", "macros", "net", "rt-multi-thread", "sync", "time", "test-util"] }
