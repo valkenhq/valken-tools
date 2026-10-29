@@ -1,0 +1,150 @@
+name: CI
+
+# Runs format check, clippy and the unit tests on every PR into main and on
+# every push to main.  When a PR is merged, the same checks run on the merge
+# commit and, if they pass, the merge commit is tagged v<Cargo.toml version>
+# and released.
+#
+# Every PR bumps the version itself (`make bump-patch`, `bump-minor` or
+# `bump-major`); the "Version bumped" check fails until it does. So the tag
+# and Cargo.toml always agree, and the workflow never pushes to main.
+#
+# Label the PR `release:skip` to merge without a version bump or release
+# (docs, CI-only changes).
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled, closed]
+  # Direct pushes to main (hotfixes, version fixes) get the same checks;
+  # they never release — only a merged PR does.
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}-${{ github.event.action == 'closed' && 'merged' || 'pr' }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Lint and test
+    # Closed-without-merge PRs have nothing to check.
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # On merge, check exactly the commit that will be tagged.
+          ref: ${{ github.event.pull_request.merged == true && github.event.pull_request.merge_commit_sha || '' }}
+
+      # Installs the toolchain + components pinned in rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Clippy
+        run: make lint
+
+      - name: Tests (unit, integration, doctests)
+        run: make test
+
+      - name: Docs
+        run: make doc
+
+  version:
+    name: Version bumped
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      !contains(github.event.pull_request.labels.*.name, 'release:skip')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cargo.toml version must be above the latest tag
+        run: |
+          version=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          name=$(sed -n '/^\[package\]/,/^\[/s/^name = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          locked=$(awk -v n="$name" '$0 == "name = \"" n "\"" { getline; gsub(/version = |"/, ""); print; exit }' Cargo.lock)
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          echo "Cargo.toml: $version, Cargo.lock: $locked, latest tag: ${latest:-none}"
+          if [ "$locked" != "$version" ]; then
+            echo "::error file=Cargo.lock::Cargo.lock has $name $locked but Cargo.toml says $version. Use make bump-patch (or bump-minor / bump-major)."
+            exit 1
+          fi
+          if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "${latest#v}" "$version" | sort -V | tail -n1)" != "$version" -o "${latest#v}" = "$version" ]; then
+            echo "::error file=Cargo.toml::Version $version is not above the latest release $latest. Run make bump-patch (or bump-minor / bump-major), or label the PR release:skip."
+            exit 1
+          fi
+
+  msrv:
+    name: Build on the declared MSRV
+    # `rust-version` in Cargo.toml is only a promise if something checks it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - name: Install MSRV toolchain
+        run: |
+          rustup toolchain install "${{ steps.msrv.outputs.version }}" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - name: cargo check on MSRV
+        run: cargo "+${{ steps.msrv.outputs.version }}" check --all-targets
+
+  release:
+    name: Tag release
+    needs: [check, msrv]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      !contains(github.event.pull_request.labels.*.name, 'release:skip')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      # Releases run one at a time.
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Read the version to release
+        id: version
+        run: |
+          version=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag $tag already exists. The PR should have bumped Cargo.toml (make bump-patch)."
+            exit 1
+          fi
+          echo "Releasing $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh release create "$TAG" \
+            --target "${{ github.event.pull_request.merge_commit_sha }}" \
+            --title "$TAG" \
+            --notes "Released from #${PR_NUMBER}: ${PR_TITLE}" \
+            --generate-notes
