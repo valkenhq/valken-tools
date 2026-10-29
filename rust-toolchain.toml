@@ -1,0 +1,5 @@
+# Pin the toolchain so local runs and CI use the same rustfmt/clippy; new
+# clippy releases add lints, so bump this deliberately and fix what it flags.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
