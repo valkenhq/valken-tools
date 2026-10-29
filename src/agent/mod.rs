@@ -212,18 +212,21 @@ impl Agent {
         msg: &Message,
         emit: &mut (dyn FnMut(Event) + Send),
     ) -> Vec<Block> {
-        let calls = msg.tool_uses().map(|(id, name, input)| {
-            let registry = &self.registry;
-            async move {
-                (
-                    id.to_owned(),
-                    registry
-                        .call(turn.actor, turn.pro, name, input.clone())
-                        .await,
-                )
-            }
-        });
+        // Owned copies first: a closure over the borrowed `(&str, &str,
+        // &Value)` triples returning an async block trips rustc's
+        // higher-ranked lifetime check ("implementation of `FnOnce` is not
+        // general enough") as soon as a caller spawns the turn as a
+        // `Send + 'static` task.
+        let calls: Vec<(String, String, serde_json::Value)> = msg
+            .tool_uses()
+            .map(|(id, name, input)| (id.to_owned(), name.to_owned(), input.clone()))
+            .collect();
+        let registry = &self.registry;
         futures::stream::iter(calls)
+            .map(|(id, name, input)| async move {
+                let call = registry.call(turn.actor, turn.pro, &name, input).await;
+                (id, call)
+            })
             .buffered(MAX_PARALLEL_TOOLS)
             .collect::<Vec<_>>()
             .await
