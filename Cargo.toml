@@ -2,7 +2,7 @@
 name = "valken-tools"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "Valken's agent tool layer: one tool registry for the in-app agent and the MCP server, with redaction and an append-only audit log"
 license = "Apache-2.0"
 repository = "https://github.com/valkenhq/valken-tools"

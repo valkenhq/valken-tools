@@ -14,3 +14,6 @@ What a model never gets: Secret values, env values, credential flags on
 command lines, ConfigMap values (by default), spec-copy annotations, and
 names that would address anything but the named object — see `SECURITY.md`
 and `AGENTS.md`.
+
+Requires Rust 1.89 (`rust-version`): `uuid` 1.29 and `enum-ordinalize` 4.4.2
+(via `kube-runtime` 3.1) no longer build on 1.88.
