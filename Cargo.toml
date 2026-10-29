@@ -1,6 +1,6 @@
 [package]
 name = "valken-tools"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.89"
 description = "Valken's agent tool layer: one tool registry for the in-app agent and the MCP server, with redaction and an append-only audit log"
